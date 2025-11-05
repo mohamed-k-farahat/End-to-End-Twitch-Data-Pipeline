@@ -1,5 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from airflow.decorators import dag
+from airflow.sensors.external_task import ExternalTaskSensor
 from cosmos import DbtTaskGroup, ProjectConfig, ProfileConfig, RenderConfig
 from cosmos.profiles import SnowflakeUserPasswordProfileMapping
 import os
@@ -31,7 +32,7 @@ SNOWFLAKE_PROFILE_CONFIG = ProfileConfig(
 @dag(
     dag_id="dbt_transform_pipeline",
     start_date=datetime(2025, 11, 1),
-    schedule='@hourly',
+    schedule='*/15 * * * *',  # Match the ingestion schedule
     catchup=False,
     tags=['twitch', 'dbt', 'transform'],
     default_args={"retries": 2},

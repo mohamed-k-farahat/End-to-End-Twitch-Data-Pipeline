@@ -26,12 +26,10 @@ models:
 
     # Rule 1: Everything in the 'staging' folder...
     staging:
-      materialized: view  # (No '+')
-      schema: staging     # (No '+')
+      materialized: view  
                            # This will now build in: ANALYTICS.STAGING
 
     # Rule 2: Everything in the 'marts' folder...
     marts:
-      materialized: table   # (No '+')
-      schema: public      # (This is optional, but good to be explicit)
+      materialized: table  
                            # This will now build in: ANALYTICS.PUBLIC
