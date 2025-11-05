@@ -1,0 +1,67 @@
+version: 2
+
+sources:
+  # This tells dbt where our raw data lives
+  - name: api_data
+    database: TWITCH_RAW
+    schema: API_DATA
+    tables:
+      - name: RAW_STREAMS
+      - name: RAW_USERS
+      - name: RAW_GAMES
+
+models:
+  # --- STAGING STREAMS ---
+  - name: stg_streams
+    description: "One row per live stream, per snapshot. This view will contain duplicates if the same stream is in multiple files."
+    
+    # --- THIS IS THE FIX ---
+    # We test for the *combination* of keys at the model level,
+    # not just one column.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - stream_id
+            - snapshot_timestamp
+
+    columns:
+      - name: stream_id
+        description: "The unique ID for the live stream. NOT unique by itself in this table."
+        tests:
+          # We removed the 'unique' test from here
+          - not_null 
+
+      - name: viewer_count
+        description: "Number of viewers for the stream."
+        tests:
+          - not_null
+
+      - name: user_id
+        description: "The ID of the streamer. This is our foreign key to stg_users."
+        tests:
+          - not_null
+      
+      - name: game_id
+        description: "The ID of the game. This is our foreign key to stg_games."
+        tests:
+          - not_null
+
+  # --- STAGING GAMES ---
+  - name: stg_games
+    description: "One row per unique game, de-duplicated."
+    columns:
+      - name: game_id
+        description: "The unique ID (primary key) for the game."
+        tests:
+          - unique
+          - not_null
+
+  # --- STAGING USERS ---
+  - name: stg_users
+    description: "One row per unique user, de-duplicated."
+    columns:
+      - name: user_id
+        description: "The unique ID (primary key) for the user."
+        tests:
+          - unique
+          - not_null

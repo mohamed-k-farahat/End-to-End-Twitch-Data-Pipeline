@@ -1,0 +1,37 @@
+# This is your main project configuration file
+
+name: 'twitch_pipeline'
+version: '1.0.0'
+config-version: 2
+
+# This tells dbt to use the 'twitch_pipeline' connection in your profiles.yml
+profile: 'twitch_pipeline'
+
+# File path configurations
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# --- THIS IS THE CORRECTED CONFIGURATION ---
+models:
+  # This must match your project 'name:' at the top
+  twitch_pipeline:
+
+    # Rule 1: Everything in the 'staging' folder...
+    staging:
+      materialized: view  # (No '+')
+      schema: staging     # (No '+')
+                           # This will now build in: ANALYTICS.STAGING
+
+    # Rule 2: Everything in the 'marts' folder...
+    marts:
+      materialized: table   # (No '+')
+      schema: public      # (This is optional, but good to be explicit)
+                           # This will now build in: ANALYTICS.PUBLIC
