@@ -62,4 +62,3 @@ def dbt_transform_dag():
 # --- 5. Instantiate the DAG ---
 # This is a standard Airflow practice to make the DAG discoverable
 dbt_transform_dag()
-

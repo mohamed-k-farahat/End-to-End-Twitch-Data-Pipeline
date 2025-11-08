@@ -52,56 +52,134 @@ def fetch_and_load_to_blob():
     }
     print("Twitch access token received.")
 
-    # --- 3. API Call 1: Get Top Streams ---
+    # --- 3. API Call 1: Get Top Streams (with pagination to get 5000) ---
     streams_url = 'https://api.twitch.tv/helix/streams'
-    params_streams = {'first': 100}
-    response = requests.get(streams_url, headers=headers, params=params_streams)
-    response.raise_for_status()
-    streams_data = response.json().get('data', [])
-    print(f"Fetched {len(streams_data)} live streams.")
+    streams_data = []
+    cursor = None
+    target_streams = 1000  # Reduced from 5000 to avoid Azure upload timeouts
+    max_pages = 10  # 10 pages × 100 = 1000 streams
+    
+    print(f"Fetching up to {target_streams} live streams...")
+    
+    for page in range(max_pages):
+        params_streams = {'first': 100}
+        if cursor:
+            params_streams['after'] = cursor
+        
+        response = requests.get(streams_url, headers=headers, params=params_streams)
+        response.raise_for_status()
+        page_data = response.json()
+        
+        data = page_data.get('data', [])
+        streams_data.extend(data)
+        
+        # Get pagination cursor for next page
+        cursor = page_data.get('pagination', {}).get('cursor')
+        
+        print(f"Page {page + 1}: Fetched {len(data)} streams (Total: {len(streams_data)})")
+        
+        # Stop if no more data or reached target
+        if not cursor or len(streams_data) >= target_streams:
+            break
+    
+    print(f"Successfully fetched {len(streams_data)} live streams.")
     
     if not streams_data:
         print("No live streams found. Exiting.")
         return
 
     # --- 4. Process IDs for Batch Calls ---
-    user_ids = {stream['user_id'] for stream in streams_data}
-    game_ids = {stream['game_id'] for stream in streams_data if stream.get('game_id')}
+    user_ids = list({stream['user_id'] for stream in streams_data})
+    game_ids = list({stream['game_id'] for stream in streams_data if stream.get('game_id')})
 
-    # --- 5. API Call 2: Get User Details (Batch) ---
+    # --- 5. API Call 2: Get User Details (Batched in chunks of 100) ---
+    # Twitch API allows max 100 user IDs per request
     users_url = 'https://api.twitch.tv/helix/users'
-    params_users = [('id', user_id) for user_id in user_ids]
-    response = requests.get(users_url, headers=headers, params=params_users)
-    response.raise_for_status()
-    users_data = response.json().get('data', [])
-    print(f"Fetched {len(users_data)} user details.")
+    users_data = []
+    batch_size = 100
+    
+    print(f"Fetching details for {len(user_ids)} users in batches of {batch_size}...")
+    
+    for i in range(0, len(user_ids), batch_size):
+        batch = user_ids[i:i + batch_size]
+        params_users = [('id', user_id) for user_id in batch]
+        
+        response = requests.get(users_url, headers=headers, params=params_users)
+        response.raise_for_status()
+        batch_data = response.json().get('data', [])
+        users_data.extend(batch_data)
+        
+        print(f"  Fetched {len(batch_data)} users (Total: {len(users_data)}/{len(user_ids)})")
+    
+    print(f"Successfully fetched {len(users_data)} user details.")
 
-    # --- 6. API Call 3: Get Game Details (Batch) ---
-    games_url = 'https://api.twitch.tv/helix/games' # <-- This line is now fixed
-    params_games = [('id', game_id) for game_id in game_ids]
-    response = requests.get(games_url, headers=headers, params=params_games)
-    response.raise_for_status()
-    games_data = response.json().get('data', [])
-    print(f"Fetched {len(games_data)} game details.")
+    # --- 6. API Call 3: Get Game Details (Batched in chunks of 100) ---
+    # Twitch API allows max 100 game IDs per request
+    games_url = 'https://api.twitch.tv/helix/games'
+    games_data = []
+    
+    print(f"Fetching details for {len(game_ids)} games in batches of {batch_size}...")
+    
+    for i in range(0, len(game_ids), batch_size):
+        batch = game_ids[i:i + batch_size]
+        params_games = [('id', game_id) for game_id in batch]
+        
+        response = requests.get(games_url, headers=headers, params=params_games)
+        response.raise_for_status()
+        batch_data = response.json().get('data', [])
+        games_data.extend(batch_data)
+        
+        print(f"  Fetched {len(batch_data)} games (Total: {len(games_data)}/{len(game_ids)})")
+    
+    print(f"Successfully fetched {len(games_data)} game details.")
 
     # --- 7. Save Data to JSON (in memory) ---
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Use UTC timestamp to match Twitch API timezone (timezone-aware)
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
     file_list = [
         {'blob_path': f'streams/streams_{timestamp}.json', 'data': json.dumps(streams_data, indent=2)},
         {'blob_path': f'users/users_{timestamp}.json',   'data': json.dumps(users_data, indent=2)},
         {'blob_path': f'games/games_{timestamp}.json',   'data': json.dumps(games_data, indent=2)}
     ]
-    print(f"JSON data prepared with timestamp: {timestamp}")
+    print(f"Preparing JSON files with UTC timestamp: {timestamp}")
+    print(f"  Streams: {len(streams_data)} records")
+    print(f"  Users: {len(users_data)} records")
+    print(f"  Games: {len(games_data)} records")
+    
+    # Compact JSON (no indentation) to reduce file size for faster uploads
+    file_list = [
+        {'blob_path': f'streams/streams_{timestamp}.json', 'data': json.dumps(streams_data), 'type': 'streams'},
+        {'blob_path': f'users/users_{timestamp}.json',   'data': json.dumps(users_data), 'type': 'users'},
+        {'blob_path': f'games/games_{timestamp}.json',   'data': json.dumps(games_data), 'type': 'games'}
+    ]
+    
+    print(f"JSON data serialized successfully.")
 
     # --- 8. Upload to Azure Blob Storage ---
-    blob_service_client = BlobServiceClient.from_connection_string(AZURE_CONN_STRING)
+    print("Starting upload to Azure Blob Storage...")
+    
+    # Increase timeout to 300 seconds (5 minutes) per file to handle large uploads
+    blob_service_client = BlobServiceClient.from_connection_string(
+        AZURE_CONN_STRING,
+        connection_timeout=300,
+        read_timeout=300
+    )
     
     for file in file_list:
+        file_size_mb = len(file['data']) / (1024 * 1024)
+        print(f"  Uploading {file['type']}: {file['blob_path']} ({file_size_mb:.2f} MB)...")
+        
         blob_client = blob_service_client.get_blob_client(container=AZURE_CONTAINER_NAME, blob=file['blob_path'])
-        blob_client.upload_blob(file['data'], overwrite=True)
-        print(f"Successfully uploaded {file['blob_path']} to Azure.")
+        blob_client.upload_blob(file['data'], overwrite=True, timeout=300)
+        
+        print(f"  ✓ Successfully uploaded {file['type']} to Azure.")
 
-    print("Extraction and Load to Azure complete.")
+    print("=" * 60)
+    print("✓ Extraction and Load to Azure complete!")
+    print(f"  Total streams: {len(streams_data)}")
+    print(f"  Total users: {len(users_data)}")
+    print(f"  Total games: {len(games_data)}")
+    print("=" * 60)
 
 # This allows you to still test the script manually if needed,
 # but Airflow will import it as a module.
